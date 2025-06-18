@@ -1,14 +1,48 @@
-# app.py (version 2 - Universal Connector)
+# app.py (version 3 - Text Transcript Analysis)
 
 import streamlit as st
 import openai
 
-# --- Savant Prompt Template (remains the same) ---
+# --- Savant Prompt Template ---
+# This prompt remains the same, as the analysis task is unchanged.
 SAVANT_PROMPT_TEMPLATE = """
 **Persona:**
-You are an expert Product Manager...
-(The full prompt from the previous response goes here)
-...
+You are an expert Product Manager with 15 years of experience at top-tier tech companies. Your name is 'Lighthouse AI Assistant'. You are logical, meticulous, and ruthlessly pragmatic. Your sole objective is to convert messy, unstructured product discussions into clear, actionable, and developer-ready requirements for the tech platform named "Lighthouse". You never invent features or make assumptions beyond what is explicitly stated or definitively agreed upon in the provided transcript.
+
+**Context:**
+You will be given the full text transcript of a product meeting. The participants were discussing ideas, features, and changes for the "Lighthouse" platform. The conversation contains brainstorming, debates, and discarded ideas. Your task is to analyze this entire transcript, identify the *final, agreed-upon decisions*, and discard all conversational fluff, rejected ideas, and undecided topics.
+
+**Primary Directive:**
+Analyze the provided transcript. Your goal is to identify and synthesize the **final requirements** and **changes** that have clear consensus. If there is ambiguity or no clear decision is made on a topic, you must explicitly state that the topic was discussed but no decision was reached. Do not invent details or requirements.
+
+**Output Format:**
+You must structure your entire output in Markdown format. The output must be organized into two main sections: "Final Changes & Requirements" and "Actionable Development Tasks (Jobs-to-be-Done)".
+
+---
+
+**1. Final Changes & Requirements**
+
+In this section, provide a summary of the key decisions. For each decision, specify:
+* **Feature/Component:** The part of the Lighthouse platform being discussed.
+* **Decision Summary:** A concise description of the agreed-upon change or new feature.
+* **Key Discussion Points:** Bullet points summarizing the core reasoning that led to the decision.
+* **Explicitly Discarded Ideas:** A list of related ideas that were discussed but rejected during the conversation.
+
+**2. Actionable Development Tasks (Jobs-to-be-Done Format)**
+
+This section is for the development team. Convert every decision from the previous section into detailed, actionable tasks using the "Jobs-to-be-Done" (JTBD) framework. Each task must be self-contained and clear.
+
+For each JTBD, use the following template:
+
+**Job Story:**
+* **When** [Situation/Context]: Describe the situation the user is in.
+* **I want to** [Motivation/Goal]: Describe what the user wants to do.
+* **So I can** [Expected Outcome]: Describe the desired outcome or benefit.
+* **Reference:** [Quote the key sentence(s) from the transcript that confirms this requirement.]
+
+**Acceptance Criteria:**
+* A numbered list of specific, testable conditions that must be met for this job to be considered complete. These criteria must be directly derived from the conversation.
+
 **3. Undecided Topics (If Any)**
 * List any topics that were discussed but where no clear consensus or final decision was reached. For each, briefly state the point of contention.
 """
@@ -21,69 +55,51 @@ st.set_page_config(
 
 # --- Main App UI ---
 st.title("💡 Lighthouse AI Product Manager")
-st.markdown("Upload an audio recording of a product meeting, and the AI will analyze it to produce detailed requirements and actionable development tasks.")
+st.markdown("Upload a meeting transcript (.txt file), and the AI will analyze it to produce detailed requirements and actionable development tasks.")
 
-# --- Universal API Client Initialization ---
-# Intelligently determines whether to use Azure OpenAI or standard OpenAI
+# --- API Client Initialization for Azure ---
 client = None
 try:
-    # Check for Azure-specific secrets first
-    if st.secrets.get("AZURE_OPENAI_ENDPOINT") and st.secrets.get("AZURE_CHAT_DEPLOYMENT_NAME"):
-        st.info("Azure OpenAI environment detected.", icon="🔷")
+    # This setup now ONLY looks for Azure credentials.
+    if st.secrets.get("AZURE_OPENAI_ENDPOINT"):
         client = openai.AzureOpenAI(
             azure_endpoint=st.secrets["AZURE_OPENAI_ENDPOINT"],
             api_key=st.secrets["AZURE_OPENAI_API_KEY"],
             api_version=st.secrets["OPENAI_API_VERSION"]
         )
-        # Get deployment names from secrets
         chat_model_name = st.secrets["AZURE_CHAT_DEPLOYMENT_NAME"]
-        whisper_model_name = st.secrets["AZURE_WHISPER_DEPLOYMENT_NAME"]
-
-    # Fallback to standard OpenAI API
-    elif st.secrets.get("OPENAI_API_KEY"):
-        st.info("Standard OpenAI environment detected.", icon="🟢")
-        client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-        # Use standard model names
-        chat_model_name = "gpt-4o"
-        whisper_model_name = "whisper-1"
-
     else:
-        st.error("No valid OpenAI or Azure OpenAI API credentials found in Streamlit secrets.", icon="🚨")
+        st.error("Azure OpenAI credentials not found. Please add them to your Streamlit secrets.", icon="🚨")
         st.stop()
-
 except Exception as e:
-    st.error(f"Error initializing AI client: {e}", icon="🚨")
+    st.error(f"Error initializing Azure client: {e}", icon="🚨")
     st.stop()
 
-
-# --- File Uploader ---
+# --- File Uploader for Text Files ---
 uploaded_file = st.file_uploader(
-    "Choose an audio file (.mp3, .wav, .m4a)",
-    type=['mp3', 'wav', 'm4a']
+    "Choose a meeting transcript file (.txt)",
+    type=['txt']
 )
 
 if uploaded_file is not None and client:
-    if st.button("Analyze Meeting Audio"):
+    if st.button("Analyze Transcript"):
         try:
-            # Stage 1: High-Fidelity Transcription
-            with st.spinner('Stage 1/2: Transcribing audio file... This may take a moment.'):
-                transcript = client.audio.transcriptions.create(
-                    model=whisper_model_name, # Use the determined model/deployment name
-                    file=uploaded_file,
-                    response_format="text"
-                )
+            # --- Main Execution Logic ---
+            with st.spinner('AI Product Manager is analyzing the transcript...'):
+                # Read the content of the uploaded text file
+                # We decode it as UTF-8, which is a standard text format.
+                transcript_text = uploaded_file.getvalue().decode("utf-8")
 
-            st.info("Transcription complete.", icon="✅")
-            with st.expander("View Full Transcript"):
-                st.write(transcript)
+                # Display the uploaded transcript for reference
+                with st.expander("View Full Uploaded Transcript"):
+                    st.text(transcript_text)
 
-            # Stage 2: Intelligent Analysis & Requirement Generation
-            with st.spinner('Stage 2/2: AI Product Manager is analyzing the transcript...'):
+                # Send the transcript text to GPT-4o for analysis
                 analysis_response = client.chat.completions.create(
-                    model=chat_model_name, # Use the determined model/deployment name
+                    model=chat_model_name,
                     messages=[
                         {"role": "system", "content": SAVANT_PROMPT_TEMPLATE},
-                        {"role": "user", "content": f"Here is the transcript...\n\n{transcript}"}
+                        {"role": "user", "content": f"Here is the transcript of the product meeting:\n\n---\n\n{transcript_text}"}
                     ],
                     temperature=0.0
                 )
